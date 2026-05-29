@@ -157,7 +157,7 @@ getHtml'' url = do
   mgrHttps <- liftIO $ newManager tlsManagerSettings
   requ <- parseRequest (renderLink url)
   response <- liftIO $ httpLbs requ mgrHttps
-  return $ extractDadBod response
+  return $ extractDadBodText response
 
 
 -- aside
@@ -200,7 +200,7 @@ getHtml' url = do
   mgrHttps <- newManager tlsManagerSettings
   requ <- parseRequest url
   response <- httpLbs requ mgrHttps
-  return $ extractDadBod response
+  return $ extractDadBodText response
 
 
 
@@ -219,11 +219,11 @@ getHtml mgr url = do
     req = requ { requestHeaders = (fmap . fmap) (encodeUtf8 . pack) headers
                , secure = True
                }
-  (mgr', r) <- catch (fmap ((mgr,) . extractDadBod) $ httpLbs requ mgr) (recoverMgr' url)
+  (mgr', r) <- catch (fmap ((mgr,) . extractDadBodText) $ httpLbs requ mgr) (recoverMgr' url)
   return (mgr', r)
 
 
-recoverMgr' :: Link -> HttpException -> IO (Manager, String)
+recoverMgr' :: Link -> HttpException -> IO (Manager, Html)
 recoverMgr' url _ = mkProxdManager >>= flip getHtml url
 
 
@@ -312,7 +312,7 @@ instance SessionState Manager where
   clickWritePdf manager filepath x@(Clickable _ url) = do
     (pdf, mgr) <- getHtmlST manager url
     -- path <- liftIO $ resultPath searchTerm (getHost baseU) (Paper x) >>= flip writeFile pdf
-    liftIO $ writeFile filepath pdf
+    liftIO $ writeFile filepath (unpack pdf)
     return $ Right mgr
       -- Invalidate normal HTML responses here------
       -- AND if file did not download then this was not a PdfLink like expected
@@ -381,7 +381,7 @@ getHtmlMgr mgr url = do
     req = requ { requestHeaders = (fmap . fmap) (encodeUtf8 . pack) headers
                , secure = True
                }
-  (mgr', r) <- catch (fmap ((mgr,) . extractDadBod) $ httpLbs requ mgr) (recoverMgr' url)
+  (mgr', r) <- catch (fmap ((mgr,) . extractDadBodText) $ httpLbs requ mgr) (recoverMgr' url)
   return (mgr', r)
 
 
@@ -392,7 +392,7 @@ baseGetHtml manager req = do
   hResponse <- responseOpenHistory req manager
   let
     finReq = hrFinalRequest hResponse
-    dadBodNew response = (unpack . decodeUtf8) response
+    dadBodNew response = decodeUtf8 response
   finResBody <- fmap mconcat $ brConsume $ responseBody $ hrFinalResponse hResponse
   return (dadBodNew finResBody, Link $ (unpack . decodeUtf8) $ (host finReq) <> (path finReq) <> (queryString finReq), manager)
 
@@ -562,13 +562,13 @@ readMyBody res = do
     body = LBS.fromChunks chunks
   print "hey"
   --print body
-  pure $ unpack . LazyTX.toStrict . mySafeDecoder  {-(readHtml . fromStrict)-} $ body
+  pure $ LazyTX.toStrict . mySafeDecoder  {-(readHtml . fromStrict)-} $ body
   where
     mySafeDeco :: LBS.ByteString -> LazyTX.Text
     mySafeDeco = Lazy.decodeUtf8With (\_ _ -> Just '?')
 
 readHtml :: LBS.ByteString -> Html
-readHtml = unpack . LazyTX.toStrict . mySafeDecoder
+readHtml = LazyTX.toStrict . mySafeDecoder
 
 mkRGateUrl pgNum term = rGateBaseUrl <> "/search/publication?q=" <> term <> "&page=" <> (show pgNum)
 
@@ -580,7 +580,7 @@ instance SessionState CookieManager where
     req <- buildReq cj link
     hRes <- liftIO $ httpHistLbs req mgr
     let newCookies = responseCookieJar . hrFinalResponse $ hRes
-    return (extractDadBod . hrFinalResponse $ hRes, CookieManager (cj <> newCookies) mgr)
+    return (extractDadBodText . hrFinalResponse $ hRes, CookieManager (cj <> newCookies) mgr)
 
   getHtmlAndUrl (CookieManager cj mgr) url = do
     req <- buildReq cj url
@@ -610,11 +610,13 @@ instance SessionState CookieManager where
 
   -- in future we could use applyJS or something to make perfect
   -- in future this could return a WebDocument
-  click _ cmanager (Clickable _ url) = getHtmlST cmanager url
+  click _ cmanager (Clickable _ url) = do
+    (h, c) <- getHtmlST cmanager url
+    pure (unpack h, c)
 
   clickWritePdf cmanager filepath x@(Clickable _ url) = do
     (pdf, mgr) <- getHtmlST cmanager url
-    liftIO $ writeFile filepath pdf
+    liftIO $ writeFile filepath (unpack pdf)
     return $ Right mgr
  
   clickWriteFile = undefined 
@@ -901,7 +903,7 @@ saveReq' link func _ = do
     --     -- res <- (brConsume $ hrFinalResponse hRes)
     --     let
     --       finReq = hrFinalRequest hResponse
-    --       dadBodNew response = (unpack . decodeUtf8) response
+    --       dadBodNew response = decodeUtf8 response
     --     finResBody <- (brRead (responseBody $ hrFinalResponse hResponse))
     --     return (dadBodNew finResBody, (unpack . decodeUtf8) $ (host finReq) <> (path finReq) <> (queryString finReq), mgr)
 

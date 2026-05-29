@@ -71,7 +71,8 @@ scrapeProxyList = do
     
   -- mapM_ print $ fromMaybe [] $ fromRight Nothing (parse (findNaive parser) "" response)
     
-  case runScraperOnHtml parser response of
+  -- Local getHtml' below returns String, but scrappy-core's
+  case runScraperOnHtml parser (pack response) of
     Just (rows) ->
       return (fmap rowToProxy (rows))
     Nothing -> ioError $ userError "proxy error: couldnt get proxy"

@@ -10,7 +10,9 @@ module Scrappy.Requests.BuildActions where
 import Scrappy.Elem.SimpleElemParser (elemParser)
 -- import Elem.ElemHeadParse 
 import Scrappy.Elem.Types (TreeHTML, Elem, Elem'(..), ElemHead, ElementRep, Attrs, ShowHTML, innerText', elTag, attrs, UrlPagination(..), matches', showH)
-import Scrappy.Elem.ElemHeadParse (hrefParser', hrefParser, attrsParser, parseOpeningTag, attrsMatch')
+-- hrefParser' was removed from scrappy-core (only hrefParser remains).
+-- We rebuild the "filtered href" behavior inline in getValidHref below.
+import Scrappy.Elem.ElemHeadParse (hrefParser, attrsParser, parseOpeningTag, attrsMatch')
 -- import Links (Link, Option, Namespace, UrlPagination(..), maybeUsefulUrl)
 
 import Scrappy.Links (maybeUsefulUrl, Url, BaseUrl, Link(..) )
@@ -539,7 +541,7 @@ searchForm :: Stream s m Char => ParsecT s u m ParsedForm
 searchForm = do
   Elem' _ as matches innerT <- elemParser (Just ["form"]) (Just inputElem) []
   let
-    count = length $ fromMaybe [] $ runScraperOnHtml ((try $ string "Search") <|> string "search") innerT
+    count = length $ fromMaybe [] $ runScraperOnHtml ((try $ string "Search") <|> string "search") (pack innerT)
     getAction = pack . fromJust . (Map.lookup "action")
     getMethod as = case fromJust ((Map.lookup "method") as) of
                   "get" -> methodGet
@@ -880,7 +882,7 @@ data FormError = InvalidElement
 -- | NOTE: formElem is a specialized
 
 findForms :: String -> Maybe [ParsedForm]
-findForms html = runScraperOnHtml formElem html
+findForms html = runScraperOnHtml formElem (pack html)
 
 -- mkForm :: Elem' a -> Either FormError ParsedForm
 -- mkForm element = 
@@ -1383,7 +1385,15 @@ validHrefs :: Stream s m Char => String -> ParsecT s u m (Maybe [String])
 validHrefs baseUrl = findNaive (getValidHref baseUrl)
 
 getValidHref :: Stream s m Char => String ->  ParsecT s u m String
-getValidHref baseUrl = hrefParser' (isPrefixOf baseUrl)
+getValidHref baseUrl = do
+  -- Rebuild the old hrefParser' (which took a String -> Bool filter)
+  -- by parsing any href then failing the alternative if it doesn't
+  -- match the prefix. 'findNaive' will move past the failure and keep
+  -- looking, so the net behavior matches the removed combinator.
+  href <- hrefParser
+  if isPrefixOf baseUrl href
+    then return href
+    else fail "href did not match required prefix"
   -- where
     -- cheapShit :: String -> String -> Bool 
     -- cheapShit baseU str = isPrefixOf baseU str
@@ -1436,7 +1446,7 @@ commonUrlTrups (e1, e2, e3) = commonElHUrls (hrefElHs e1) (hrefElHs e2) (hrefElH
 
 
 hrefElHs :: Elem' String -> [ElemHead] 
-hrefElHs e = fromMaybe [] $ runScraperOnHtml validHrefElHs (innerText' e)
+hrefElHs e = fromMaybe [] $ runScraperOnHtml validHrefElHs (pack (innerText' e))
 
 validHrefElHs :: Stream s m Char => ParsecT s u m ElemHead
 validHrefElHs = parseOpeningTag Nothing [("href", Nothing)]
