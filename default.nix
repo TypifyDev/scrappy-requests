@@ -16,7 +16,7 @@ let
 
 in mkDerivation {
   pname = "scrappy-requests";
-  version = "0.1.0.4";
+  version = "0.1.0.0";
   src = ./.;
   libraryHaskellDepends = [
     aeson base bytestring containers directory http-client
