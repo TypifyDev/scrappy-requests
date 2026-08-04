@@ -312,7 +312,7 @@ instance SessionState Manager where
   clickWritePdf manager filepath x@(Clickable _ url) = do
     (pdf, mgr) <- getHtmlST manager url
     -- path <- liftIO $ resultPath searchTerm (getHost baseU) (Paper x) >>= flip writeFile pdf
-    liftIO $ writeFile filepath (unpack pdf)
+    liftIO $ writeFile filepath pdf
     return $ Right mgr
       -- Invalidate normal HTML responses here------
       -- AND if file did not download then this was not a PdfLink like expected
@@ -392,7 +392,7 @@ baseGetHtml manager req = do
   hResponse <- responseOpenHistory req manager
   let
     finReq = hrFinalRequest hResponse
-    dadBodNew response = decodeUtf8 response
+    dadBodNew response = unpack $ decodeUtf8 response
   finResBody <- fmap mconcat $ brConsume $ responseBody $ hrFinalResponse hResponse
   return (dadBodNew finResBody, Link $ (unpack . decodeUtf8) $ (host finReq) <> (path finReq) <> (queryString finReq), manager)
 
@@ -497,14 +497,14 @@ getHtmlText url = do
                }
 
   response <- httpLbs requ mgrHttps
-  return $ extractDadBodText response
+  return $ pack $ extractDadBodText response
 
 
 
 
 
-extractDadBodText :: Response LBS.ByteString -> Text
-extractDadBodText = LazyTX.toStrict . mySafeDecoder . responseBody
+extractDadBodText :: Response LBS.ByteString -> Html
+extractDadBodText = unpack . LazyTX.toStrict . mySafeDecoder . responseBody
 
 
 
@@ -562,13 +562,13 @@ readMyBody res = do
     body = LBS.fromChunks chunks
   print "hey"
   --print body
-  pure $ LazyTX.toStrict . mySafeDecoder  {-(readHtml . fromStrict)-} $ body
+  pure $ unpack $ LazyTX.toStrict . mySafeDecoder  {-(readHtml . fromStrict)-} $ body
   where
     mySafeDeco :: LBS.ByteString -> LazyTX.Text
     mySafeDeco = Lazy.decodeUtf8With (\_ _ -> Just '?')
 
 readHtml :: LBS.ByteString -> Html
-readHtml = LazyTX.toStrict . mySafeDecoder
+readHtml = unpack . LazyTX.toStrict . mySafeDecoder
 
 mkRGateUrl pgNum term = rGateBaseUrl <> "/search/publication?q=" <> term <> "&page=" <> (show pgNum)
 
@@ -612,11 +612,11 @@ instance SessionState CookieManager where
   -- in future this could return a WebDocument
   click _ cmanager (Clickable _ url) = do
     (h, c) <- getHtmlST cmanager url
-    pure (unpack h, c)
+    pure (h, c)
 
   clickWritePdf cmanager filepath x@(Clickable _ url) = do
     (pdf, mgr) <- getHtmlST cmanager url
-    liftIO $ writeFile filepath (unpack pdf)
+    liftIO $ writeFile filepath pdf
     return $ Right mgr
  
   clickWriteFile = undefined 
@@ -903,7 +903,7 @@ saveReq' link func _ = do
     --     -- res <- (brConsume $ hrFinalResponse hRes)
     --     let
     --       finReq = hrFinalRequest hResponse
-    --       dadBodNew response = decodeUtf8 response
+    --       dadBodNew response = unpack $ decodeUtf8 response
     --     finResBody <- (brRead (responseBody $ hrFinalResponse hResponse))
     --     return (dadBodNew finResBody, (unpack . decodeUtf8) $ (host finReq) <> (path finReq) <> (queryString finReq), mgr)
 

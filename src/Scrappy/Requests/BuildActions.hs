@@ -541,7 +541,7 @@ searchForm :: Stream s m Char => ParsecT s u m ParsedForm
 searchForm = do
   Elem' _ as matches innerT <- elemParser (Just ["form"]) (Just inputElem) []
   let
-    count = length $ fromMaybe [] $ runScraperOnHtml ((try $ string "Search") <|> string "search") (pack innerT)
+    count = length $ fromMaybe [] $ runScraperOnHtml ((try $ string "Search") <|> string "search") innerT
     getAction = pack . fromJust . (Map.lookup "action")
     getMethod as = case fromJust ((Map.lookup "method") as) of
                   "get" -> methodGet
@@ -882,7 +882,7 @@ data FormError = InvalidElement
 -- | NOTE: formElem is a specialized
 
 findForms :: String -> Maybe [ParsedForm]
-findForms html = runScraperOnHtml formElem (pack html)
+findForms html = runScraperOnHtml formElem html
 
 -- mkForm :: Elem' a -> Either FormError ParsedForm
 -- mkForm element = 
@@ -1446,7 +1446,7 @@ commonUrlTrups (e1, e2, e3) = commonElHUrls (hrefElHs e1) (hrefElHs e2) (hrefElH
 
 
 hrefElHs :: Elem' String -> [ElemHead] 
-hrefElHs e = fromMaybe [] $ runScraperOnHtml validHrefElHs (pack (innerText' e))
+hrefElHs e = fromMaybe [] $ runScraperOnHtml validHrefElHs (innerText' e)
 
 validHrefElHs :: Stream s m Char => ParsecT s u m ElemHead
 validHrefElHs = parseOpeningTag Nothing [("href", Nothing)]
