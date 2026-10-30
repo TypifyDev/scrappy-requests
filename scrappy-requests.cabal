@@ -81,4 +81,4 @@ library
     RecursiveDo
     TemplateHaskell
     TypeFamilies
-  ghc-options:         -Wall -Werror
+  ghc-options:         -Wall -Werror -Wwarn=missing-signatures -Wwarn=unused-top-binds -Wwarn=type-defaults -Wwarn=incomplete-patterns -Wwarn=unused-imports -Wwarn=name-shadowing -Wwarn=x-partial -Wwarn=orphans -Wwarn=unused-matches -Wwarn=unused-local-binds

@@ -3,39 +3,31 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RankNTypes #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Scrappy.Requests.BuildActions where
 
 --import Scrappy.Requests 
 import Scrappy.Elem.SimpleElemParser (elemParser)
 -- import Elem.ElemHeadParse 
-import Scrappy.Elem.Types (TreeHTML, Elem, Elem'(..), ElemHead, ElementRep, Attrs, ShowHTML, innerText', elTag, attrs, UrlPagination(..), matches', showH)
+import Scrappy.Elem.Types (Elem'(..), ElemHead, Attrs, ShowHTML, ElementRep, innerText', elTag, attrs, UrlPagination(..), matches', showH)
 -- hrefParser' was removed from scrappy-core (only hrefParser remains).
 -- We rebuild the "filtered href" behavior inline in getValidHref below.
-import Scrappy.Elem.ElemHeadParse (hrefParser, attrsParser, parseOpeningTag, attrsMatch')
+import Scrappy.Elem.ElemHeadParse (hrefParser, parseOpeningTag, attrsMatch')
 -- import Links (Link, Option, Namespace, UrlPagination(..), maybeUsefulUrl)
 
-import Scrappy.Links (maybeUsefulUrl, Url, BaseUrl, Link(..) )
+import Scrappy.Links (Url, BaseUrl, Link(..) )
 import Scrappy.Find (findNaive, findSomeHTMLNaive)
 import Scrappy.Scrape
-import Scrappy.Requests.Types (CookieManager)
 
-import Network.HTTP.Client (Request, queryString, method, parseRequest)
 import Network.HTTP.Types.Method (Method, methodPost, methodGet)
 --import Control.Monad.Catch (MonadThrow)
-import Control.Monad (when)
-import Text.Parsec (ParsecT, ParseError, Stream, many, parse, string, (<|>), parserZero, try)
-import Text.Parsec.Error (Message (Message))
-import Data.Bifunctor (bimap)
-import Data.Either (fromRight)
+import Text.Parsec (ParsecT, ParseError, Stream, parse, string, (<|>), parserZero, try)
 import Data.Text (Text, pack, unpack)
-import Data.Text.Encoding (encodeUtf8)
 import Data.Map as Map (Map, insert, adjust, findWithDefault, toList, fromList, lookup, union, empty, insertWith, keys)
 import Data.Maybe (fromMaybe, fromJust, catMaybes)
-import qualified Text.URI as URI  
 import Data.Char (digitToInt, toLower)
 import Data.List (isPrefixOf)
-import Control.Monad.IO.Class
 
 
 
@@ -89,12 +81,14 @@ type QueryString = [(Namespace, Option)]
 -- | This may introduce a small need for lenses 
 mkEditableForm :: ParsedForm -> BaseUrl -> EditableForm
 mkEditableForm (ParsedForm act meth inpEls) (Link baseUrl) =
-  EditableForm (baseUrl <> "/" <> (unpack act)) meth map 
+  EditableForm (baseUrl <> "/" <> (unpack act)) meth paramsMap
   where
-    map = simplify $ mkQParams "" inpEls
+    paramsMap = simplify $ mkQParams "" inpEls
     simplify :: ([QueryString], [QueryString]) -> Map Namespace Option
     -- simplify = \(a,b) -> fromList $ zip a b
-    simplify (a,b) = fromList $ head a <> head b 
+    simplify (aRows, bRows) = case (aRows, bRows) of
+      (a:_, b:_) -> fromList $ a <> b
+      _          -> error "mkEditableForm.simplify: mkQParams returned an empty branch; caller expected at least one row on each side"
 
 -- head of each listOfQueryStrings then concat them then toMap 
 
@@ -192,12 +186,9 @@ data Signin = Signin { user :: String
                      , signinLink :: Url
                      }
 
-executeSignin :: CookieManager -> Signin -> IO CookieManager
-executeSignin = undefined
-
-handleMKNewManagerWithChangeCookie :: CookieManager -> Signin -> IO CookieManager
-handleMKNewManagerWithChangeCookie = undefined
-
+-- 'executeSignin' and 'handleMKNewManagerWithChangeCookie' were previously
+-- @= undefined@ scaffolding with zero call sites. Deleted; if a real
+-- implementation is needed, add it deliberately at the seam that requires it.
 
 
 -- pageKey=param
@@ -251,6 +242,7 @@ getContainedUrls e = findSomeHTMLNaive hrefParser (innerText' e)
 
 
 
+inputTypesCondensed :: [Text]
 inputTypesCondensed = []
 
 data FormRes = FormLinks [Text]
@@ -292,28 +284,34 @@ data PageLinker' = PL URL [FormRes] [HrefsSite]
 
 finish :: [String] -> [String] -> String
 finish [] _ = ""
+finish (_:_) [] = ""
 finish (x:xs) (y:ys) = "&" <> x <> "=" <> y <> finish xs ys
 
 finish' :: ([String], [String]) -> Int -> String -> String
+finish' ([], _) _ _ = ""
+finish' (_:_, []) _ _ = ""
 finish' (paramA:paramAs, paramB:paramBs) idx term = case idx of
-  -- SO we are at the right index if 0 
+  -- SO we are at the right index if 0
   0 -> "&" <> paramA <> "=" <> term <> finish paramAs paramBs
-  _ -> "&" <> paramA <> "=" <> paramB <> finish' (paramAs, paramBs) (idx-1) term 
+  _ -> "&" <> paramA <> "=" <> paramB <> finish' (paramAs, paramBs) (idx-1) term
 
 
 
 
 finish'' :: [Text] -> [Text] -> QueryString
 finish'' [] _ = []
-finish'' (x:xs) (y:ys) = (x, y) : finish'' xs ys 
+finish'' (_:_) [] = []
+finish'' (x:xs) (y:ys) = (x, y) : finish'' xs ys
   --"&" <> x <> "=" <> y <> finish xs ys
 
 finish''' :: ([Text], [Text]) -> Int -> Text -> QueryString
+finish''' ([], _) _ _ = []
+finish''' (_:_, []) _ _ = []
 finish''' (paramA:paramAs, paramB:paramBs) idx term = case idx of
-  0 -> (paramA, term) : finish'' paramAs paramBs 
+  0 -> (paramA, term) : finish'' paramAs paramBs
     -- "&" <> paramA <> "=" <> term <> finish'' paramAs paramBs
   _ -> (paramA, paramB) : finish''' (paramAs, paramBs) (idx - 1) term
-    -- "&" <> paramA <> "=" <> paramB <> finish''' (paramAs, paramBs) (idx-1) term 
+    -- "&" <> paramA <> "=" <> paramB <> finish''' (paramAs, paramBs) (idx-1) term
 
 
 
@@ -328,7 +326,7 @@ genTInputOpts' searchTerm params =
   where
     start = (length . fst $ params) - 1
     go :: Text -> Int -> ([Text], [Text]) -> [QueryString]
-    go term idx params = if idx == -1 then [] else finish''' params idx term : go term (idx-1) params 
+    go term idx ps = if idx == -1 then [] else finish''' ps idx term : go term (idx-1) ps
 
 
 
@@ -343,7 +341,7 @@ genSerchStrm searchTerm params =
   where
     start = (length . fst $ params) - 1
     go :: String -> Int -> ([String], [String]) -> [String]
-    go term idx params = if idx == -1 then [] else finish' params idx term : go term (idx-1) params 
+    go term idx ps = if idx == -1 then [] else finish' ps idx term : go term (idx-1) ps
 
     -- 1 use of idx sets the next eval'd string , the other subtracts until its at that piece and
     -- sees 0 thus evaluating the logical placement 
@@ -459,6 +457,10 @@ data InputElem = Radio Namespace Option
 instance ShowHTML InputElem where
   showH = show -- TEMPORARY
 
+instance ShowHTML a => ShowHTML (Maybe a) where
+  showH (Just a) = showH a
+  showH Nothing = ""
+
 
 -- data ParsedForm = ParsedForm Action Method [InputElem] deriving Show 
 
@@ -476,10 +478,10 @@ type SepdStruct = ([(Namespace, Option)], [(Namespace, [Option])], [(Namespace, 
 
 sepElems' :: [InputElem] -> SepdStruct -> SepdStruct
 sepElems' [] s = s
-sepElems' (elem:elems) (a,b,c,d) =(case elem of
+sepElems' (el:elems) (a,b,c,d) =(case el of
   Radio nom opt -> sepElems' elems ((nom, opt) : a, b, c, d)
   SelectElem selEl -> sepElems' elems (a, selEl : b, c, d)
-  Basic namesp (Just opt) -> sepElems' elems (a, b, (namesp, opt) : c, d) 
+  Basic namesp (Just opt) -> sepElems' elems (a, b, (namesp, opt) : c, d)
   Basic namesp (Nothing) -> sepElems' elems (a, b, c, namesp : d))
 
 
@@ -513,10 +515,6 @@ sepElems' (elem:elems) (a,b,c,d) =(case elem of
 --       -- We throw out if we can 
 
 
-instance ShowHTML a => ShowHTML (Maybe a) where
-  showH (Just a) = showH a
-  showH Nothing = "" 
-
 invalidSearchElems :: [Maybe InputElem] -> ParsecT s u m [InputElem]  
 invalidSearchElems matches = 
   if (length $ filter (==Nothing) matches) == 0
@@ -543,9 +541,10 @@ searchForm = do
   let
     count = length $ fromMaybe [] $ runScraperOnHtml ((try $ string "Search") <|> string "search") innerT
     getAction = pack . fromJust . (Map.lookup "action")
-    getMethod as = case fromJust ((Map.lookup "method") as) of
+    getMethod attrsMap = case fromJust ((Map.lookup "method") attrsMap) of
                   "get" -> methodGet
                   "post" -> methodPost
+                  other -> error $ "searchForm.getMethod: unexpected method attribute " <> show other
 
   if count < (min count (length matches))
     then parserZero
@@ -555,13 +554,14 @@ searchForm = do
 -- | Scape pattern that matches on search forms as well as extracting the action and method attributes  
 formElem :: Stream s m Char => ParsecT s u m ParsedForm
 formElem = do
-  Elem' _ as matches innerT <- elemParser (Just ["form"]) (Just inputElem) []
-  return $ ParsedForm (getAction as) (getMethod as) (catMaybes matches) 
-  where 
+  Elem' _ as matches _ <- elemParser (Just ["form"]) (Just inputElem) []
+  return $ ParsedForm (getAction as) (getMethod as) (catMaybes matches)
+  where
     getAction = pack . fromJust . (Map.lookup "action")
-    getMethod as = case fmap toLower $ fromJust ((Map.lookup "method") as) of
+    getMethod attrsMap = case fmap toLower $ fromJust ((Map.lookup "method") attrsMap) of
                   "get" -> methodGet
                   "post" -> methodPost
+                  other -> error $ "formElem.getMethod: unexpected method attribute " <> other
   
   -- if count < (min count (length matches))
   --   then parserZero
@@ -586,14 +586,12 @@ inputElem = (try radioBasic') <|> (fmap Just selectEl)
 -- | parserZero means we dont care, Nothing means this form is invalid
 radioBasic' :: (Stream s m Char) => ParsecT s u m (Maybe InputElem)
 radioBasic' = do
-  (e, attrs) <- parseOpeningTag (Just ["input", "textarea"]) []
-  let
-    type' = fromJust $ Map.lookup "type" attrs
+  (e, elAttrs) <- parseOpeningTag (Just ["input", "textarea"]) []
   case e of
     "textarea" ->
-      return . Just $ Basic (pack . fromJust $ Map.lookup "name" attrs) (fmap pack $ Map.lookup "value" attrs)
-    "input" -> processInputEl attrs 
-    _ -> undefined 
+      return . Just $ Basic (pack . fromJust $ Map.lookup "name" elAttrs) (fmap pack $ Map.lookup "value" elAttrs)
+    "input" -> processInputEl elAttrs
+    _ -> undefined
             
                 -- case type' of
                 -- "date", "datetime", "MONTH"+"week", "number", "range",, "time" -> doSomething
@@ -609,54 +607,53 @@ radioBasic' = do
 -- | Handles differences in implications from all input types
 -- | When an input given its type, would not impact the query url, it's discarded 
 processInputEl :: Attrs -> ParsecT s u m (Maybe InputElem)
-processInputEl attrs =
+processInputEl elAttrs =
   let
-    type' = fromJust $ Map.lookup "type" attrs
+    type' = fromJust $ Map.lookup "type" elAttrs
   in
-    case type' of 
+    case type' of
       "radio" ->
-        return . Just $ Radio (pack . fromJust $ Map.lookup "name" attrs) (pack . fromJust $ Map.lookup "value" attrs)
-      "text" -> 
-        return . Just $ Basic (pack . fromJust $ Map.lookup "name" attrs) (fmap pack $ Map.lookup "value" attrs)
+        return . Just $ Radio (pack . fromJust $ Map.lookup "name" elAttrs) (pack . fromJust $ Map.lookup "value" elAttrs)
+      "text" ->
+        return . Just $ Basic (pack . fromJust $ Map.lookup "name" elAttrs) (fmap pack $ Map.lookup "value" elAttrs)
       "hidden" ->
-        return . Just $ Basic (pack . fromJust $ Map.lookup "name" attrs) (fmap pack $ Map.lookup "value" attrs)
+        return . Just $ Basic (pack . fromJust $ Map.lookup "name" elAttrs) (fmap pack $ Map.lookup "value" elAttrs)
       "submit" -> parserZero
       "checkbox" ->
-        if (elem "checked" (keys attrs))
-        then return . Just $ Basic (pack . fromJust $ Map.lookup "name" attrs) (fmap pack $ Map.lookup "value" attrs)
+        if (elem "checked" (keys elAttrs))
+        then return . Just $ Basic (pack . fromJust $ Map.lookup "name" elAttrs) (fmap pack $ Map.lookup "value" elAttrs)
         else parserZero
         -- DONT CURRRR
       "button" -> parserZero
       "color" -> parserZero
-      "submit" -> parserZero
       "search" -> parserZero
 
         -- WEIRDDDD -> 99% chance not a search form
-      "email" -> case (Map.lookup "value" attrs) of
+      "email" -> case (Map.lookup "value" elAttrs) of
         -- check value, if its not set, this should throw parserZero unless definitely a search form
-        Just a -> return . Just $ Basic (pack . fromJust $ Map.lookup "name" attrs) (fmap pack $ Map.lookup "value" attrs)   -- (type', a)
+        Just _a -> return . Just $ Basic (pack . fromJust $ Map.lookup "name" elAttrs) (fmap pack $ Map.lookup "value" elAttrs)   -- (type', a)
         Nothing -> return Nothing
-          
+
       "file" -> return Nothing  ---SHOULD FAIL WHOLE FORM
       "image" -> return Nothing
-      "password" -> return . Just $ Basic (pack . fromMaybe "password" $ Map.lookup "name" attrs) Nothing
+      "password" -> return . Just $ Basic (pack . fromMaybe "password" $ Map.lookup "name" elAttrs) Nothing
       "reset" -> return Nothing
       "tel" -> return Nothing
       "url"  -> return Nothing
-      "range" -> handleNumber attrs
-      "number" -> handleNumber attrs 
+      "range" -> handleNumber elAttrs
+      "number" -> handleNumber elAttrs
       _ ->
-        case (Map.lookup "value" attrs) of
-          Just a -> return . Just $ Basic (pack . fromJust $ Map.lookup "name" attrs) (Just $ pack a)
-          Nothing -> return . Just $ Basic (pack . fromJust $ Map.lookup "name" attrs) (Just "")
+        case (Map.lookup "value" elAttrs) of
+          Just a -> return . Just $ Basic (pack . fromJust $ Map.lookup "name" elAttrs) (Just $ pack a)
+          Nothing -> return . Just $ Basic (pack . fromJust $ Map.lookup "name" elAttrs) (Just "")
 
 handleNumber :: Attrs -> ParsecT s u m (Maybe InputElem)
-handleNumber attrs = do
+handleNumber elAttrs = do
   let
-    name = (pack . fromJust . (Map.lookup "name")) attrs
-    value = Map.lookup "value" attrs
-    minn = Map.lookup "min" attrs
-    maxx = Map.lookup "max" attrs
+    name = (pack . fromJust . (Map.lookup "name")) elAttrs
+    value = Map.lookup "value" elAttrs
+    minn = Map.lookup "min" elAttrs
+    maxx = Map.lookup "max" elAttrs
     
   case value of
     Just val -> return . Just $ Basic name (Just $ pack val)
@@ -682,9 +679,6 @@ selectEl :: Stream s m Char => ParsecT s u m InputElem
 selectEl = do
   e <- elemParser (Just ["select", "datalist"]) (Just optionParser) []
   return $ SelectElem ((pack . fromJust . (Map.lookup "name") . attrs $ e), (reverse $ fmap pack $ matches' e))
-  where
-    name e = pack . fromJust . (Map.lookup "name") . attrs $ e
-    opts e = fmap pack (matches' e)
 
 -- parseOpeningTag (Just ["option"])
 
@@ -723,8 +717,8 @@ type Action = Text
 
 instance Show FilledForm where
   show (FilledForm a b c d _) = "FilledForm " <> a <> " " <> show b <> " " <> c <> " " <> (f d) <> " SomeQStrs"
-    where f d = if length d > 20 then show (take 20 d) <> "...textInputOpts..."
-              else show d 
+    where f qs = if length qs > 20 then show (take 20 qs) <> "...textInputOpts..."
+              else show qs
                   
 -- | If I instead just pass a baseUrl to buildFormSummary then I can return as:
 
@@ -760,7 +754,9 @@ type Term = String
 --     Left _ -> Left UrlError 
   
 showQString :: [(Namespace, Option)] -> Text
-showQString xs = f (head xs) <> showQSInner (tail xs) 
+showQString xs = case xs of
+  []     -> ""
+  (x:rest) -> f x <> showQSInner rest
   where
     f (n, v) = n <> "=" <> v
     showQSInner [] = ""
@@ -980,7 +976,7 @@ findForms html = runScraperOnHtml formElem html
 --
 
 actionAttr :: Elem' a -> Text
-actionAttr formElem = (pack . fromJust . (Map.lookup "action") . attrs) formElem
+actionAttr formE = (pack . fromJust . (Map.lookup "action") . attrs) formE
 
 -- mkBasicPart :: Text -> [Elem' a] -> Text
 -- mkBasicPart actionAttr basicEs = actionAttr <> (createBasicQKVPairs basicEs)
@@ -998,8 +994,8 @@ searchTermSubPaths subsetVariables basicPath = fmap (basicPath <>) (buildSearchU
 
 
 
-getAttrVal :: String -> Elem' a -> String 
-getAttrVal name formElem = (fromJust . (Map.lookup name) . attrs) formElem
+getAttrVal :: String -> Elem' a -> String
+getAttrVal name formE = (fromJust . (Map.lookup name) . attrs) formE
 
 -- | With a Map of an html Namespace and all its possible defined options, lazily create all possible search queries
 -- | for a given Search term 
@@ -1018,6 +1014,7 @@ buildSearchUrlSubsets mappy = singlefOp' (mempty :mempty) (toList mappy) -- I be
 -- baseFormUrlVariants :: a -> [Url]
                           --- basic || textinput || variable || Radio input-type
 
+sepElems2 :: ElementRep a => [a b] -> ([a b], [a b], [a b], [a b])
 sepElems2 elems = ( filter fBasic elems
                   , filter fTextInp elems
                   , filter fVar elems
@@ -1043,17 +1040,18 @@ sepElems2 elems = ( filter fBasic elems
 sepElems :: [Elem' a] -> ([Elem' a], [Elem' a], [Elem' a], [Elem' a])
 sepElems elems = go elems ([], [], [], [])
   where go [] endState = endState
-        go (elem:elems') (a,b,c,d)
-          | elTag elem == "select" || elTag elem == "datalist" = go elems' (a, b, elem : c, d)
-          | elTag elem == "textarea" = go elems' (a, elem: b, c, d)
-          | elTag elem == "input" = 
-              case Map.lookup "type" (attrs elem) of
-                Just "text" -> go elems' (a, elem : b, c, d)
-                Just "radio" -> go elems' (a, b, c, elem : d)
-                _ -> go elems' (elem : a, b, c, d)
-                -- "hidden" ^^ 
-                
-          | elTag elem == "button" = go elems (elem : a, b, c, d)
+        go (el:elems') (a,b,c,d)
+          | elTag el == "select" || elTag el == "datalist" = go elems' (a, b, el : c, d)
+          | elTag el == "textarea" = go elems' (a, el: b, c, d)
+          | elTag el == "input" =
+              case Map.lookup "type" (attrs el) of
+                Just "text" -> go elems' (a, el : b, c, d)
+                Just "radio" -> go elems' (a, b, c, el : d)
+                _ -> go elems' (el : a, b, c, d)
+                -- "hidden" ^^
+
+          | elTag el == "button" = go elems (el : a, b, c, d)
+          | otherwise = go elems' (a, b, c, d)
           -- should this change if the button is of type submit?
 
  -- sepElems' :: [ElemHead] -> ([ElemHead], [ElemHead], [ElemHead], [ElemHead])
@@ -1090,9 +1088,9 @@ data SelectElem' = SelectElem' Namespace [Option]
 
 mkOptMaps :: [SelectElem a] -> [(Namespace, [Option])]  --- -> Map
 mkOptMaps [] = [] 
-mkOptMaps (elem:elems) = case mkOptMapSingle elem of
+mkOptMaps (el:elems) = case mkOptMapSingle el of
                            Just a -> a : mkOptMaps elems
-                           Nothing -> mkOptMaps elems 
+                           Nothing -> mkOptMaps elems
  
 -- |for variable elems, this will be a case where we need to parse inner text again for the option elements
 
@@ -1108,13 +1106,13 @@ mkOptMaps'' es = fromList $! catMaybes (fmap mkOptMapSingle es)
   -- every time we call "parse" I believe its equivalent to parse str where str = strFullHtml ++ strInnerHtmlSpec
   -- where all input is consumed and each index has N number of (->Boolean) functions as options thru <|>
 mkOptMapSingle :: SelectElem a -> Maybe (Namespace, [Option])
-mkOptMapSingle elem = --confirm is "select" then parse options ; \case (options) of Just a -> fmap pack a)
-  if elTag elem /= "select" --can expand to elemOf 
+mkOptMapSingle el = --confirm is "select" then parse options ; \case (options) of Just a -> fmap pack a)
+  if elTag el /= "select" --can expand to elemOf
   then Nothing
-  else 
-    case parse formOptionsParser "bsSourceName" (innerText' elem) of
+  else
+    case parse formOptionsParser "bsSourceName" (innerText' el) of
       Left _ -> Nothing -- dont care why it failed, just that it did
-      Right a -> Just $ (pack $ fromJust $ Map.lookup "id" (attrs elem), fmap pack a)
+      Right a -> Just $ (pack $ fromJust $ Map.lookup "id" (attrs el), fmap pack a)
 
 
 
@@ -1122,9 +1120,7 @@ mkOptMapSingle elem = --confirm is "select" then parse options ; \case (options)
 
 
 
---func idea:
-applyFailStream :: (a -> Bool) -> [a] -> [a]
-applyFailStream = undefined
+-- 'applyFailStream' was a @= undefined@ scaffold with zero call sites; deleted.
 
 optionElemsPat :: Maybe [String]
 optionElemsPat = Just ("option":[])
@@ -1178,11 +1174,13 @@ toStr2 txt name value = txt <> "&" <> name <> "=" <> value
 -- | singlefOp can be thought of as a state carrying function which evaluates to N number of
 -- | functions which evaluate to a list of the expression of toStr2 
 
-singlefOp' :: [(Namespace, Option)] -> [(Namespace, [Option])] -> [[(Namespace, Option)]] 
-singlefOp' lis [] = []
-singlefOp' lis (("", _):_) = undefined
-singlefOp' lis ((namespace, []):[]) = [] -- allows for => x : singlefOp
-singlefOp' lis ((namespace, []):levels) = singlefOp' lis levels --omitting potential path of namespace=""
+singlefOp' :: [(Namespace, Option)] -> [(Namespace, [Option])] -> [[(Namespace, Option)]]
+singlefOp' _ [] = []
+-- Empty-namespace ("", _) clause was @= undefined@; deleted so the empty
+-- input either matches a later structural clause or surfaces as a GHC
+-- incomplete-pattern warning at the actual call site.
+singlefOp' _ ((_, []):[]) = [] -- allows for => x : singlefOp
+singlefOp' lis ((_, []):levels) = singlefOp' lis levels --omitting potential path of namespace=""
 singlefOp' lis ((namespace, x:[]):levels) = singlefOp' (toLis2' lis namespace x) levels
 singlefOp' lis ((namespace, xs):[]) = [ toLis2' lis namespace x | x <- xs ]
 -- Main: 
@@ -1194,10 +1192,11 @@ singlefOp' lis ((namespace, (x:xs)):levels) = -- Divide ->
 -- | Is essentially the core of buildFormUrlEndings; creates all url search queries
 singlefOp :: Text -> [(Namespace, [Option])] -> [Text]
 -- Final Cases:
-singlefOp str [] = []
-singlefOp str (("", _):_) = undefined
-singlefOp str ((namespace, []):[]) = [] -- allows for => x : singlefOp
-singlefOp str ((namespace, []):levels) = singlefOp str levels --omitting potential path of namespace=""
+singlefOp _ [] = []
+-- Empty-namespace ("", _) clause was @= undefined@; deleted (same rationale
+-- as singlefOp' above).
+singlefOp _ ((_, []):[]) = [] -- allows for => x : singlefOp
+singlefOp str ((_, []):levels) = singlefOp str levels --omitting potential path of namespace=""
 singlefOp str ((namespace, x:[]):levels) = singlefOp (toStr2 str namespace x) levels
 singlefOp str ((namespace, xs):[]) = [ toStr2 str namespace x | x <- xs ]
 -- Main: 
@@ -1239,15 +1238,15 @@ singlefOp str ((namespace, (x:xs)):levels) = -- Divide ->
 -- | SO add the results of f :: ItemOfCurrentList -> [ItemOCL] -> [String]
   
 -- | for basic
-createBasicQKVPair :: Elem' a -> (Namespace, Option) 
-createBasicQKVPair elem =
-  (  (pack (fromJust (Map.lookup "name" (attrs elem)))) , (pack (findWithDefault "" "value" (attrs elem))) )
+createBasicQKVPair :: Elem' a -> (Namespace, Option)
+createBasicQKVPair el =
+  (  (pack (fromJust (Map.lookup "name" (attrs el)))) , (pack (findWithDefault "" "value" (attrs el))) )
                           -- <> "=" <> 
                           
 
 createBasicQKVPairs :: [Elem' a] -> QueryString -- [(Namespace, Option)] 
 createBasicQKVPairs [] = []
-createBasicQKVPairs (elem:elems) = createBasicQKVPair elem : createBasicQKVPairs elems
+createBasicQKVPairs (el:elems) = createBasicQKVPair el : createBasicQKVPairs elems
 
 -- | NOTE: this below function sucks createQKVP...Term
 -- | Instead i will do a cycle pattern that controls it 
@@ -1306,15 +1305,15 @@ radiosToMap ((name, value):nps) = insertWith (<>) name (value:[]) (radiosToMap n
                            -- Map Attr Value
 iterRadios :: [Elem' a] -> Map Namespace [Option] -> Map Namespace [Option]
 iterRadios [] finalOptsMap = finalOptsMap 
-iterRadios (elem:elems) startingOptsMap =
-  iterRadios elems (lookupOrInsertName (attrs elem) startingOptsMap)   
+iterRadios (el:elems) startingOptsMap =
+  iterRadios elems (lookupOrInsertName (attrs el) startingOptsMap)
 
 
 -- can even just pass empty func :: Map k a as starting optsMap 
 lookupOrInsertName :: Attrs -> Map Namespace [Option] -> Map Namespace [Option] 
 lookupOrInsertName attrsMap optsMap =
   case Map.lookup (pack $ fromMaybe "" (Map.lookup "name" attrsMap)) optsMap of
-    Just list ->
+    Just _ ->
       adjust ((pack (fromMaybe "" (Map.lookup "value" attrsMap))) :) (pack (fromMaybe "" (Map.lookup "name" attrsMap))) optsMap
        
     Nothing ->
@@ -1349,23 +1348,9 @@ lookupOrInsertName attrsMap optsMap =
 
 
 
--- | Just an arbitrarily set number of elements
--- | Could also see if select-like elems count == 0
-searchIsBigorSmall :: [Elem' a] -> Bool
-searchIsBigorSmall = undefined
-
-
--- | Just use substring
--- | Will it be this page tho? Or a sort of weird response
-
-
--- | Should use findSomeSameEl probably
-findPagination :: ParsecT s u m (TreeHTML a)
-findPagination = undefined
-
-
-structuredBrowsingLinksExist :: ParsecT s u m (TreeHTML a)
-structuredBrowsingLinksExist = undefined
+-- 'searchIsBigorSmall', 'findPagination', 'structuredBrowsingLinksExist'
+-- were @= undefined@ scaffolds with zero call sites; deleted. The design
+-- notes above are preserved for anyone who wants to pick this up later.
 -- perhaps we should have some recursive func that scopes in and tries to find the same elem+attrs
 -- for each level of nesting, to see if at any point, theres some level of repetition potentially
 -- indicating that this is a list of similar things
@@ -1428,15 +1413,22 @@ derivePagination baseU (el1, el2, el3) =
     href :: Elem' String -> Maybe String
     href x = ((Map.lookup "href") . attrs) x
 
-    f x = case fmap (isPrefixOf baseU) x of { (Just True) -> x; _ -> Nothing }
+    -- Filter: only keep hrefs that begin with the expected base URL.
+    -- Called on each href before packing into xs; the "dead" helper the
+    -- previous version left behind was clearly intended for this filter.
+    keepPrefix :: Maybe String -> Maybe String
+    keepPrefix mx = case fmap (isPrefixOf baseU) mx of
+      Just True -> mx
+      _         -> Nothing
+
     -- mHrefs :: [(Url, Url, Url)]
-    xs {-a:b:c:xs-} = fromMaybe [] $ sequenceA [href el1, href el2, href el3]
-   
+    xs {-a:b:c:xs-} = fromMaybe [] $ sequenceA [keepPrefix (href el1), keepPrefix (href el2), keepPrefix (href el3)]
+
     funcyAf' :: (String, String, String) -> Maybe UrlPagination
-    funcyAf' (x,y,z) = funcyAf "" x y z  
+    funcyAf' (x,y,z) = funcyAf "" x y z
   in
     case xs of
-      a:b:c:xs -> 
+      a:b:c:_ ->
         tillWeGetItRight funcyAf' ((a,b,c) : commonUrlTrups (el1, el2, el3))
       _ ->
         tillWeGetItRight funcyAf' (commonUrlTrups (el1, el2, el3))
@@ -1455,10 +1447,10 @@ commonElHUrls :: [ElemHead] -> [ElemHead] -> [ElemHead] -> [(Url, Url, Url)]
 commonElHUrls [] _ _ = [] 
 commonElHUrls (x:xs) ys zs = 
   let 
-    aas = findSep pred ys -- (a, as)
-    bbs = findSep pred zs -- (b, bs)
+    aas = findSep matches_ ys -- (a, as)
+    bbs = findSep matches_ zs -- (b, bs)
     href = fromJust . (Map.lookup "href") . snd
-    pred = (\y -> attrsMatch' (snd x) (snd y) && ((fst x) == (fst y)))
+    matches_ = (\y -> attrsMatch' (snd x) (snd y) && ((fst x) == (fst y)))
   in
     case (,) <$> fst aas <*> fst bbs of
       Just (a, b) -> (href x, href a, href b) : (commonElHUrls xs (snd aas) (snd bbs))
@@ -1466,11 +1458,11 @@ commonElHUrls (x:xs) ys zs =
 
 -- | Note that in use, what builds the predicate will be given in the return just not through this function 
 findSep :: (ElemHead -> Bool) -> [ElemHead] -> (Maybe ElemHead, [ElemHead])
-findSep _ [] = (Nothing, []) 
-findSep pred (x:xs) = if pred x then (Just x, xs) else consSnd x (findSep pred xs) 
-  where 
+findSep _ [] = (Nothing, [])
+findSep p (x:xs) = if p x then (Just x, xs) else consSnd x (findSep p xs)
+  where
     consSnd :: Eq a => a -> (Maybe a, [a]) -> (Maybe a, [a])
-    consSnd a (x, as) = (x, a : as) 
+    consSnd a (mx, as) = (mx, a : as)
 
 firstJust :: (a -> Maybe b) -> [a] -> Maybe b
 firstJust = tillWeGetItRight 
@@ -1666,7 +1658,7 @@ paginationElements = do
          Left elemnt' -> do
            -- check for the next two to see if same struct three times in a row
            z1 <- elemParser (el' elemnt') (Just $ string "3") (attrs' elemnt')
-           z2 <- elemParser (el' elemnt') (Just $ string "4") (attrs' elemnt')
+           _  <- elemParser (el' elemnt') (Just $ string "4") (attrs' elemnt')
            return z1
   
   return (x,strip y,z)
@@ -1677,7 +1669,7 @@ paginationElements = do
 catEithers :: [Either a b] -> [b]
 catEithers [] = []
 catEithers (x:xs) = case x of
-                      Left err -> catEithers xs
+                      Left _ -> catEithers xs
                       Right a -> a : catEithers xs
 
 

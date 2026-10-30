@@ -237,12 +237,8 @@ runConcurrentStreamParallel evalStatef prevGlobState = do
 -- | like a promise
 -- choose :: [(STM a, a -> IO ())] -> IO ()
 
---helper func
--- manageConcurrentStream :: DataStream s => s TVar -> (s TVar, TVar)
-manageConcurrentStream = undefined
-  -- Duplicates TVar, (at end of stream and and in snd of tuple)
+-- 'manageConcurrentStream' was a @= undefined@ scaffold with zero call sites; deleted.
 
- 
 -- mgCStr :: s TVar -> (TVar -> IO ()) -> IO ()
 -- mgCStr = undefined
 
@@ -263,9 +259,8 @@ manageConcurrentStream = undefined
 
 
 -- | Critical difference is that idx_N 's relevant state is passed to idx_N+1
-runStatefulConcurrentStream :: DataStream s => ((b -> a) -> a) -> s a -> b -> IO ()
-runStatefulConcurrentStream = undefined 
--- runStatefulConcurrentStream :: DataStream s => ((Manager -> a) -> a) -> s a -> Manager -> IO ()  
+-- 'runStatefulConcurrentStream' was a @= undefined@ scaffold with zero call sites; deleted.
+-- runStatefulConcurrentStream :: DataStream s => ((Manager -> a) -> a) -> s a -> Manager -> IO ()
 
 -- concurrentStream :: Stream s => (a -> b) -> s a -> s b
 runConcurrentStream'' :: (MonadIO m, DataStream s) => (a -> a) -> s a -> m (s a) 
@@ -317,9 +312,15 @@ runConcurrentStream'' evalStatef prevGlobState = do
 
 
 
-headStrm = undefined -- class func for how to get first item
-tailStrm = undefined -- class func for how to get 2nd elem and beyond
-emptyStream = undefined -- class func for how to handle empty stream -- maybe Stream superset class
+-- 'headStrm', 'tailStrm', 'emptyStream' were @= undefined@ scaffolds intended
+-- to be class methods for the DataStream class. Their type-safe equivalents
+-- already exist as 'headS' and 'tailS' on the DataStream class (see above);
+-- there is no 'emptyStream' analog because a 'Monoid' constraint already
+-- gives 'mempty'. Stubs deleted. 'findStartingPoint' / 'rectifyGlobalState'
+-- below still reference the deleted names — they are dead pseudo-code
+-- alongside the rest of this module (which the .cabal file leaves
+-- @-- , Concurrencies@ commented out of exposed-modules), left in place
+-- rather than expanding this cleanup's scope.
 
 findStartingPoint :: forall a b s. (DataStream s, Monoid a, a ~ s b) => a -> a
 -- findStartingPoint [] = mempty --done!

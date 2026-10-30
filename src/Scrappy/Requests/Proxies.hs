@@ -23,10 +23,11 @@ import Data.ByteString.Lazy (ByteString)
 
  
 testForValidProxy :: [Proxy] -> IO (Manager)
+testForValidProxy [] = ioError $ userError "testForValidProxy: no valid proxy found in list"
 testForValidProxy (proxy:proxies) = do
   req <- parseRequest "https://hackage.haskell.org/package/base-4.15.0.0/docs/Control-Exception.html#v:catch"
   trialManager <- mkManagerInternal proxy
-  print $ "hello"
+  print ("hello" :: String)
   let
     f :: IO (Manager)
     f = catch (httpLbs req trialManager >> return trialManager) g
@@ -63,9 +64,9 @@ scrapeProxyList = do
     b :: Stream s m Char => ParsecT s u m [String]
     b = ((fmap . fmap) innerText' $ many (el "td" []))
 
-    bePicky :: [[String]] -> [[String]]
-    bePicky rows = filter (\x -> not $ (isInfixOf "anonymous" (x !! 4)) || (isInfixOf "elite proxy" (x !! 4))) rows
-    
+    _bePicky :: [[String]] -> [[String]]
+    _bePicky rows = filter (\x -> not $ (isInfixOf "anonymous" (x !! 4)) || (isInfixOf "elite proxy" (x !! 4))) rows
+
     -- g :: [String] -> Proxy
     -- g row = Proxy ((encodeUtf8 . pack) (row !! 0)) (read (row !! 1) :: Int)
     

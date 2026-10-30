@@ -16,11 +16,8 @@ module Scrappy.Requests.Requests where
              -- .ExceptT (g)
 import Scrappy.Requests.Proxies (mkProxdManager)
 import Scrappy.Requests.BuildActions (FilledForm(..), showQString, Namespace, QueryString, FormError(..))
-import Scrappy.Scrape (ScraperT, runScraperOnHtml, hoistMaybe)
-import Scrappy.Find (findNaive)
-import Scrappy.Elem.ChainHTML (contains)
-import Scrappy.Elem.SimpleElemParser (el)
-import Scrappy.Elem.Types (innerText', ElemHead, Clickable(..))
+import Scrappy.Scrape (runScraperOnHtml, hoistMaybe)
+import Scrappy.Elem.Types (ElemHead, Clickable(..))
 import Scrappy.Links (BaseUrl, Link(..), renderLink)
 import Scrappy.Requests.Types (CookieManager(..))
 import Scrappy.Types (Html)
@@ -39,23 +36,22 @@ import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Client
 import Network.HTTP.Types.Method (methodGet, Method,)
 
-import System.Directory (removeFile, copyFile, getAccessTime, listDirectory)
-import Text.Parsec (ParsecT, Parsec, ParseError, parse, Stream, many)
+import System.Directory (removeFile, getAccessTime, listDirectory)
+import Text.Parsec (Parsec, ParseError)
 import Control.Monad.IO.Class (MonadIO, liftIO )
-import Control.Monad.Trans.State (StateT, gets, put, get)
+import Control.Monad.Trans.State (StateT)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad (when)
 import Control.Monad.Trans.Except (ExceptT)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
-import Data.Functor.Identity (Identity)
 import Control.Exception (Exception)
 import Control.Monad.Except (throwError)
-import Control.Monad.Catch (MonadCatch, MonadThrow, catch)
+import Control.Monad.Catch (MonadThrow, catch)
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Map (Map, toList)
-import Data.List (isInfixOf, isSuffixOf, maximumBy)
+import Data.List (maximumBy)
 import Data.Text (Text, unpack, pack)
-import Data.Text.Encoding (encodeUtf8, decodeUtf8, decodeUtf8With)
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
 import qualified Data.Text.Lazy as LazyTX (toStrict, Text)
 import qualified Data.Text.Lazy.Encoding as Lazy (decodeUtf8With)
 import qualified Data.ByteString.Lazy as LBS
@@ -64,7 +60,7 @@ import Data.Time.Clock (UTCTime)
 import Data.Time.Clock.System (SystemTime(MkSystemTime), getSystemTime, systemSeconds)
 import Data.Int (Int64)
 
-import Data.Aeson (encodeFile)
+-- import Data.Aeson (encodeFile)
 
 data ExistT m a = ExistT { runExistT :: MaybeT m a }
 
@@ -123,9 +119,6 @@ successesM :: Monad m => (a -> MaybeT m b) -> [a] -> MaybeT m [b]
 successesM fm inputs =
   lift . (fmap catMaybes) . sequenceA $ fmap (runMaybeT . fm) inputs
 
-successesM_ :: Monad m => (a -> MaybeT m b) -> [a] -> MaybeT m ()
-successesM_ a b = successesM a b >> return ()
-
 successes :: [a] -> (a -> Maybe b) -> Maybe [b]
 successes inputs f =
   case catMaybes $ fmap f inputs of
@@ -137,18 +130,6 @@ successes inputs f =
 runScraperM :: Url -> (Html -> MaybeT IO a) -> MaybeT IO a
 runScraperM url scraper = (liftIO $ getHtml' url) >>= scraper
 
-
-
-trySiteLink :: MonadIO m => Link -> (Html -> MaybeT m ()) -> MaybeT m Link
-trySiteLink url scraperBasedEffects = do
-  html <- liftIO $ getHtml' (renderLink url)
-  scraperBasedEffects html
-  return url
-
-
--- | propogate to requests module
-runScraperOnUrl' :: (MonadIO m, MonadThrow m) => Link -> ScraperT a -> m (Maybe [a])
-runScraperOnUrl' url p = fmap (runScraperOnHtml p) (getHtml'' url)
 
 
 -- | Get html with no Proxy
@@ -176,17 +157,9 @@ runScraperOnUrls urls p = fmap (foldr (<>) Nothing) $ mapM (flip runScraperOnUrl
 
 -- foldr :: (a -> b -> c)
 
-foldFunc :: Maybe [a] -> Maybe [a] -> Maybe [a]
-foldFunc = undefined
-
-runScrapersOnUrls = undefined
-
---- this is meant to be pseudo code at the moment
-type STM = IO
-
--- | Merge Maybe [a] when multiple urls
-concurrentlyRunScrapersOnUrls :: [Link] -> [ParsecT s u m a] -> STM (Maybe [a])
-concurrentlyRunScrapersOnUrls = undefined
+-- 'foldFunc', 'runScrapersOnUrls', 'concurrentlyRunScrapersOnUrls' were
+-- @= undefined@ scaffolds with zero call sites; deleted. The pseudo-code
+-- @type STM = IO@ alias they shared is also gone — no other function used it.
   -- inner will call concurrent stream functions on the given urls
 
 
@@ -211,15 +184,15 @@ getHtml :: Manager -> Link -> IO (Manager, Html)
 getHtml mgr url = do
   requ <- parseRequest (renderLink url)
   let
-    headers = [ (hUserAgent, "Mozilla/5.0 (X11; Linux x86_64; rv:84.0) Gecko/20100101 Firefox/84.0")
-              , (hAcceptLanguage, "en-US,en;q=0.5")
-              , (hAcceptEncoding, "gzip, deflate, br")
-              , (hConnection, "keep-alive")
-              ]
-    req = requ { requestHeaders = (fmap . fmap) (encodeUtf8 . pack) headers
+    hdrs = [ (hUserAgent, "Mozilla/5.0 (X11; Linux x86_64; rv:84.0) Gecko/20100101 Firefox/84.0")
+           , (hAcceptLanguage, "en-US,en;q=0.5")
+           , (hAcceptEncoding, "gzip, deflate, br")
+           , (hConnection, "keep-alive")
+           ]
+    req = requ { requestHeaders = (fmap . fmap) (encodeUtf8 . pack) hdrs
                , secure = True
                }
-  (mgr', r) <- catch (fmap ((mgr,) . extractDadBodText) $ httpLbs requ mgr) (recoverMgr' url)
+  (mgr', r) <- catch (fmap ((mgr,) . extractDadBodText) $ httpLbs req mgr) (recoverMgr' url)
   return (mgr', r)
 
 
@@ -276,14 +249,42 @@ class SessionState a where
   getHtmlAndUrl :: (MonadThrow m, MonadIO m) => a -> Link -> m (Html, Link, a)
   submitForm :: (MonadThrow m, MonadIO m) => a -> FilledForm -> m ((Html, Link, a), FilledForm)
   click :: (MonadThrow m, MonadIO m) => FilePath -> a -> Clickable -> m (String, a)
+  -- | Default: a hyperlink click is a navigation to the target 'Link'.
+  -- Drivers that need a gesture-level click (JS-driven menus, form
+  -- widgets that only respond to a real mouse event) should override.
+  -- Drivers whose whole world is "navigate + capture HTML" (Manager,
+  -- CDP-fresh, Marionette page-source) inherit this for free.
+  click _ a (Clickable _ link) = do
+    (h, a') <- getHtmlST a link
+    pure (h, a')
+
   --  Download a pdf link
   clickWritePdf :: (MonadThrow m, MonadIO m) => a -> FilePath -> Clickable -> m (Either ScrapeException a)
+  -- | Default: report 'OtherError' via the built-in failure channel.
+  -- Drivers backed by a bytes-level response interceptor (CDP
+  -- 'Fetch.enable'/'runOneDownload') override with a real
+  -- implementation; drivers without such a primitive (raw
+  -- Marionette wrappers today) inherit this honest "not supported"
+  -- answer, which callers pattern-match on 'Left'.
+  clickWritePdf _ _ _ =
+    pure (Left (OtherError "clickWritePdf: not implemented for this SessionState instance"))
+
   clickWriteFile :: (MonadThrow m, MonadIO m) => a -> FileExtension -> Clickable -> m (Either ScrapeException (), a)
+  -- | Default: report 'OtherError' via the failure channel and return
+  -- the driver state unchanged. Same rationale as 'clickWritePdf'.
+  clickWriteFile a _ _ =
+    pure (Left (OtherError "clickWriteFile: not implemented for this SessionState instance"), a)
+
   clickWriteFile' :: a
                   -> FileExtension -- desired file extension to match
                   -> FilePath -- where to save
                   -> Clickable
                   -> IO (Either ScrapeException (), a)
+  -- | Default: report 'OtherError' and return driver state unchanged.
+  -- Note this method's contract is 'IO'-typed (not @m@), so the
+  -- default doesn't polymorphize the return monad.
+  clickWriteFile' a _ _ _ =
+    pure (Left (OtherError "clickWriteFile': not implemented for this SessionState instance"), a)
 
   -- askCookies :: m CookieJar
 
@@ -304,12 +305,15 @@ instance SessionState Manager where
   submitForm manager (FilledForm actionUrl reqM term tInput qStrVari) = do
     req <- parseRequest actionUrl
     let
-      req2 = req { method = reqM, queryString = (encodeUtf8 . showQString) $ head tInput <> head qStrVari }
-      f2 = FilledForm actionUrl reqM term tInput (tail qStrVari)
+      (tHead, qHead, qTail) = case (tInput, qStrVari) of
+        (t:_, q:qs) -> (t, q, qs)
+        _ -> error "Scrappy.Requests.Requests.submitForm (Manager): empty tInput or qStrVari"
+      req2 = req { method = reqM, queryString = (encodeUtf8 . showQString) $ tHead <> qHead }
+      f2 = FilledForm actionUrl reqM term tInput qTail
 
     liftIO $ fmap (, f2) $ catch (baseGetHtml manager req2) (saveReq req2 baseGetHtml)
 
-  clickWritePdf manager filepath x@(Clickable _ url) = do
+  clickWritePdf manager filepath (Clickable _ url) = do
     (pdf, mgr) <- getHtmlST manager url
     -- path <- liftIO $ resultPath searchTerm (getHost baseU) (Paper x) >>= flip writeFile pdf
     liftIO $ writeFile filepath pdf
@@ -317,9 +321,12 @@ instance SessionState Manager where
       -- Invalidate normal HTML responses here------
       -- AND if file did not download then this was not a PdfLink like expected
 
-  click = undefined 
-  clickWriteFile = undefined 
-  clickWriteFile' = undefined 
+  -- 'click' / 'clickWriteFile' / 'clickWriteFile'' intentionally
+  -- omitted here: they fall through to the class-level defaults
+  -- ('click' navigates via 'getHtmlST'; the two write variants
+  -- return @Left OtherError@ in their failure channel). The old
+  -- @= undefined@ stubs would explode at runtime; the defaults
+  -- are honest at the type level and at every call site.
 
 
 -- we only actually wanna do this in the case of
@@ -373,15 +380,15 @@ getHtmlMgr :: Manager -> Link -> IO (Manager, Html)
 getHtmlMgr mgr url = do
   requ <- parseRequest (renderLink url)
   let
-    headers = [ (hUserAgent, "Mozilla/5.0 (X11; Linux x86_64; rv:84.0) Gecko/20100101 Firefox/84.0")
-              , (hAcceptLanguage, "en-US,en;q=0.5")
-              , (hAcceptEncoding, "gzip, deflate, br")
-              , (hConnection, "keep-alive")
-              ]
-    req = requ { requestHeaders = (fmap . fmap) (encodeUtf8 . pack) headers
+    hdrs = [ (hUserAgent, "Mozilla/5.0 (X11; Linux x86_64; rv:84.0) Gecko/20100101 Firefox/84.0")
+           , (hAcceptLanguage, "en-US,en;q=0.5")
+           , (hAcceptEncoding, "gzip, deflate, br")
+           , (hConnection, "keep-alive")
+           ]
+    req = requ { requestHeaders = (fmap . fmap) (encodeUtf8 . pack) hdrs
                , secure = True
                }
-  (mgr', r) <- catch (fmap ((mgr,) . extractDadBodText) $ httpLbs requ mgr) (recoverMgr' url)
+  (mgr', r) <- catch (fmap ((mgr,) . extractDadBodText) $ httpLbs req mgr) (recoverMgr' url)
   return (mgr', r)
 
 
@@ -413,20 +420,20 @@ getHtmlMgr' mgr url = do
 getHtmlHeaderMgr :: [Header] -> Manager -> Url -> IO (Manager, Html)
 getHtmlHeaderMgr headers mgr url = do
   -- (fmap.fmap) extractDadBod . $
-  (mgr, res) <- persistGet mgr =<< mkReq headers url
+  (mgr', res) <- persistGet mgr =<< mkReq headers url
   res' <- readMyBody $ hrFinalResponse res
-  pure (mgr, res')
+  pure (mgr', res')
 
 
 mkReq :: MonadThrow m => [Header] -> Url -> m Request
 mkReq headers url = fmap (setHeaders headers) $ parseRequest url
-  where setHeaders headers req = req { requestHeaders = headers }
+  where setHeaders hs req = req { requestHeaders = hs }
   -- return (mgr', r)
 
 recoverMgr :: Request
            -> HttpException
            -> IO (Manager, HistoriedResponse BodyReader)
-recoverMgr req _ = print "recover manager" >> (flip persistGet req =<< mkProxdManager)
+recoverMgr req _ = putStrLn "recover manager" >> (flip persistGet req =<< mkProxdManager)
 
 persistGet :: MonadIO m => Manager
            -> Request
@@ -487,16 +494,16 @@ getHtmlText url = do
   mgrHttps <- newManager tlsManagerSettings
   requ <- parseRequest url
   let
-    headers = [ (hUserAgent, "Mozilla/5.0 (X11; Linux x86_64; rv:84.0) Gecko/20100101 Firefox/84.0")
-              , (hAcceptLanguage, "en-US,en;q=0.5")
-              , (hAcceptEncoding, "gzip, deflate, br")
-              , (hConnection, "keep-alive")
-              ]
-    req = requ { requestHeaders = (fmap . fmap) (encodeUtf8 . pack) headers
+    hdrs = [ (hUserAgent, "Mozilla/5.0 (X11; Linux x86_64; rv:84.0) Gecko/20100101 Firefox/84.0")
+           , (hAcceptLanguage, "en-US,en;q=0.5")
+           , (hAcceptEncoding, "gzip, deflate, br")
+           , (hConnection, "keep-alive")
+           ]
+    req = requ { requestHeaders = (fmap . fmap) (encodeUtf8 . pack) hdrs
                , secure = True
                }
 
-  response <- httpLbs requ mgrHttps
+  response <- httpLbs req mgrHttps
   return $ pack $ extractDadBodText response
 
 
@@ -517,6 +524,7 @@ extractDadBod' = unpack . LazyTX.toStrict . mySafeDecoder
 mySafeDecoder :: LBS.ByteString -> LazyTX.Text
 mySafeDecoder = Lazy.decodeUtf8With (\_ _ -> Nothing) -- Just '?')
 
+getHistoriedBody :: Response BodyReader -> IO Html
 getHistoriedBody res = fmap (readHtml . LBS.fromStrict) $ brRead . responseBody $ res
 
 --ewqweqq
@@ -543,13 +551,13 @@ httpHistLbs req man = withResponseHistory req man $ \hRes -> do
 --   pure ()
 
 
+test2 :: IO ()
 test2 = do
-  req <- parseRequest "https://www.google.com/"
   mgr <- newManager tlsManagerSettings
-  hRes <- httpHistLbs req mgr
---  print $ extractDadBod . hrFinalResponse $ hRes
+  -- The req + httpHistLbs round-trip below was for inspecting the raw
+  -- historied response; both print sites are commented out and the
+  -- SessionState-based path is what the test currently exercises.
   print . fst =<< getHtmlST (CookieManager mempty mgr) (Link "https://www.google.com/")
-  -- print $ responseBody . hrFinalResponse $ hRes
   pure ()
 
 readMyBody :: Response (IO BS.ByteString) -> IO Html
@@ -560,23 +568,22 @@ readMyBody res = do
   let
 --    body :: ByteString
     body = LBS.fromChunks chunks
-  print "hey"
+  putStrLn "hey"
   --print body
   pure $ unpack $ LazyTX.toStrict . mySafeDecoder  {-(readHtml . fromStrict)-} $ body
-  where
-    mySafeDeco :: LBS.ByteString -> LazyTX.Text
-    mySafeDeco = Lazy.decodeUtf8With (\_ _ -> Just '?')
 
 readHtml :: LBS.ByteString -> Html
 readHtml = unpack . LazyTX.toStrict . mySafeDecoder
 
+mkRGateUrl :: Show a => a -> String -> String
 mkRGateUrl pgNum term = rGateBaseUrl <> "/search/publication?q=" <> term <> "&page=" <> (show pgNum)
 
+rGateBaseUrl :: String
 rGateBaseUrl = "https://www.researchgate.net"
 
 -- TODO(galen): rewrite these funcs to use httpHistLbs where applicable
 instance SessionState CookieManager where
-  getHtmlST cm@(CookieManager cj mgr) link = do
+  getHtmlST (CookieManager cj mgr) link = do
     req <- buildReq cj link
     hRes <- liftIO $ httpHistLbs req mgr
     let newCookies = responseCookieJar . hrFinalResponse $ hRes
@@ -597,8 +604,11 @@ instance SessionState CookieManager where
     -- req <- parseRequest url
     -- catch (baseGetHtml manager req) (saveReq' url getHtmlAndUrl)
 
-  submitForm (CookieManager cj mgr) form@(FilledForm actionUrl reqM term tInput qStrVari) = do
-    req <- mkFormRequest actionUrl reqM (head tInput <> head qStrVari)
+  submitForm (CookieManager cj mgr) form@(FilledForm actionUrl reqM _term tInput qStrVari) = do
+    let (tHead, qHead) = case (tInput, qStrVari) of
+          (t:_, q:_) -> (t, q)
+          _ -> error "Scrappy.Requests.Requests.submitForm (CookieManager): empty tInput or qStrVari"
+    req <- mkFormRequest actionUrl reqM (tHead <> qHead)
     (manager, response) <- persistGet mgr req
     let
       finalResponse = hrFinalResponse response
@@ -614,13 +624,14 @@ instance SessionState CookieManager where
     (h, c) <- getHtmlST cmanager url
     pure (h, c)
 
-  clickWritePdf cmanager filepath x@(Clickable _ url) = do
+  clickWritePdf cmanager filepath (Clickable _ url) = do
     (pdf, mgr) <- getHtmlST cmanager url
     liftIO $ writeFile filepath pdf
     return $ Right mgr
  
-  clickWriteFile = undefined 
-  clickWriteFile' = undefined 
+  -- 'clickWriteFile' / 'clickWriteFile'' fall through to the
+  -- class-level defaults (Left OtherError). Replaces the old
+  -- @= undefined@ stubs.
     -- pure ((html, cm), drop1qStrVar form)
 
   -- -- Note: qStrVari has data on basic params factored in
@@ -790,12 +801,13 @@ coerceM2E _ (Just a) = Right a
 
 firstSucc :: (a -> MaybeT IO b) -> [a] -> MaybeT IO b
 firstSucc _ [] = hoistMaybe Nothing
-firstSucc fm (a:as) = f $ fmap (runMaybeT . fm) as
+firstSucc fm (_:as) = f $ fmap (runMaybeT . fm) as
   where
+    f [] = hoistMaybe Nothing
     f (actn:actns) = do
       x <- liftIO actn
       case x of
-        Just a -> pure a
+        Just b -> pure b
         Nothing -> f actns
 
   -- let
@@ -854,8 +866,11 @@ performSiteStateMultiple :: (MonadIO m, Trajectory s) => [s] -> m ()
 performSiteStateMultiple trajs = do
   let
     tr' = dropWhile (==end) trajs
-  newState <- performSiteState (head tr')
-  when (not . null $ tr') $ performSiteStateMultiple $ (tail tr') <> (newState:[])
+  case tr' of
+    [] -> pure ()
+    (t:ts) -> do
+      newState <- performSiteState t
+      performSiteStateMultiple $ ts <> (newState:[])
 
   --when (s == end) $ performSiteStateMultiple ss
 
@@ -875,8 +890,8 @@ saveReq :: Request
         -> HttpException
         -> IO (Html, Link, Manager)
 saveReq req func _ = do
-  newManager <- mkProxdManager
-  func newManager req
+  mgr <- mkProxdManager
+  func mgr req
 
 
 saveReq' :: Link
@@ -884,8 +899,8 @@ saveReq' :: Link
          -> HttpException
          -> IO (Html, Link, Manager)
 saveReq' link func _ = do
-  newManager <- mkProxdManager
-  func newManager link
+  mgr <- mkProxdManager
+  func mgr link
 
     -- hrFinalRequest res
 
@@ -917,7 +932,7 @@ type DownloadsFolder = FilePath
 
 -- | Pulls newest file in downloads folder into program/IO scope
 takeNewestFile :: DownloadsFolder -> Clickable -> BaseUrl -> ExceptT ScrapeException IO String
-takeNewestFile dwnlds clickable baseU = do
+takeNewestFile dwnlds _clickable _baseU = do
   dirNames <- liftIO $ listDirectory dwnlds
   when (length dirNames == 0) $ throwError (PromisedPdfDownloadNF
                                         "either link was not a pdf or did not download properly or not yet")
